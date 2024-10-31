@@ -142,6 +142,21 @@ public class JPALazyDataModel<T> extends LazyDataModel<T> implements Serializabl
 
         List<Predicate> predicates = new ArrayList<>();
 
+        applyPredicatesFromFilterMetaMap(entityClass, filterBy, cb, cq, root, predicates);
+
+        if (filterEnricher != null) {
+            filterEnricher.enrich(filterBy, cb, cq, root, predicates);
+        }
+
+        if (!predicates.isEmpty()) {
+            cq.where(
+                cb.and(predicates.toArray(new Predicate[0])));
+        }
+    }
+
+    protected void applyPredicatesFromFilterMetaMap(Class<T> entityClass, Map<String, FilterMeta> filterBy, CriteriaBuilder cb,
+                                                      CriteriaQuery<?> cq,
+                                                      Root<T> root, List<Predicate>predicates) {
         if (filterBy != null) {
             FacesContext context = FacesContext.getCurrentInstance();
             Locale locale = LocaleUtils.getCurrentLocale(context);
@@ -168,15 +183,6 @@ public class JPALazyDataModel<T> extends LazyDataModel<T> implements Serializabl
                 Predicate predicate = createPredicate(filter, pd, root, cb, fieldExpression, convertedFilterValue, locale);
                 predicates.add(predicate);
             }
-        }
-
-        if (filterEnricher != null) {
-            filterEnricher.enrich(filterBy, cb, cq, root, predicates);
-        }
-
-        if (!predicates.isEmpty()) {
-            cq.where(
-                cb.and(predicates.toArray(new Predicate[0])));
         }
     }
 
@@ -397,7 +403,16 @@ public class JPALazyDataModel<T> extends LazyDataModel<T> implements Serializabl
         }
 
         public Builder<T> filterEnricher(FilterEnricher<T> filterEnricher) {
-            model.filterEnricher = filterEnricher;
+            this.model.filterEnricher = filterEnricher;
+            return this;
+        }
+
+        public Builder<T> filterEnricher(FilterEnricherWithFilterMetaPredicateApplier<T> filterEnricherWithFilterMetaPredicateApplier) {
+            this.model.filterEnricher = (filterBy, cb, cq, root, predicates) ->
+                    filterEnricherWithFilterMetaPredicateApplier.enrich(
+                            filterBy, cb, cq, root, predicates,
+                            filterMetaMap -> this.model.applyPredicatesFromFilterMetaMap(this.model.entityClass, filterMetaMap, cb, cq, root, predicates)
+                    );
             return this;
         }
 
@@ -497,5 +512,16 @@ public class JPALazyDataModel<T> extends LazyDataModel<T> implements Serializabl
     public interface FilterEnricher<T> extends Serializable {
 
         void enrich(Map<String, FilterMeta> filterBy, CriteriaBuilder cb, CriteriaQuery<?> cq, Root<T> root, List<Predicate> predicates);
+    }
+
+    @FunctionalInterface
+    public interface FilterEnricherWithFilterMetaPredicateApplier<T> extends Serializable {
+        void enrich(Map<String, FilterMeta> filterBy, CriteriaBuilder cb, CriteriaQuery<?> cq, Root<T> root, List<Predicate> predicates,
+                    FilterMetaToPredicateApplier<T> filterMetaToPredicateApplier);
+    }
+
+    @FunctionalInterface
+    public interface FilterMetaToPredicateApplier<T> extends Serializable {
+        void apply(Map<String, FilterMeta> filterBy);
     }
 }
